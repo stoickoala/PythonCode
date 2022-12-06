@@ -1,9 +1,8 @@
 import os
 import sys
-import numpy as np
 import pandas as pd
 import datetime
-from edwards.loader import Odbc
+import json
 import pyodbc
 import re
 import types
@@ -20,24 +19,28 @@ from bokeh.models.widgets.markups import Div
 from math import ceil
 import math
 from sympy.ntheory import primefactors
+import statsmodels as sm
 
 # Prompts, Inputs and Data Retrieval #
 
 ## Login ##
 
+RESOURCES_PATH = os.path.join(sys.path[0][:sys.path[0].rindex('\\')], r'Resources')
+
 login_file_path = os.path.join(sys.path[0][:sys.path[0].rindex('\\')], r'Resources\login.json')
 
-db = Odbc.load_login(file=login_file_path)
+with open(login_file_path, 'r') as json_file:
+    login_details = json.load(json_file)
 
 ## Obtain list of all databases with relevant information ##
 
 master_db = 'master'
 
 master_db_connection = pyodbc.connect('Driver={SQL Server};'
-                                'Server=' + db.server + ';'
+                                'Server=' + login_details['server'] + ';'
                                  'Database=' + master_db + ';'
-                                 'Uid=' + db.uid + ';'
-                                 'Pwd=' + db.pwd + ';')
+                                 'Uid=' + login_details['uid'] + ';'
+                                 'Pwd=' + login_details['pwd'] + ';')
 
 get_databases_query = ("select name \
                         from master.sys.databases \
@@ -48,28 +51,39 @@ customer_data_databases = pd.read_sql_query(get_databases_query, master_db_conne
 ## Prompt user for the customer/database of interest ##
 
 confirmation = 'N'
-while confirmation == 'N':
+while confirmation != 'Y':
     print(customer_data_databases.iloc[1:])
     choices = customer_data_databases.iloc[1:].index.to_list()
-    user_choice = int(input('\nUsing the the table displayed, please enter the number corresponding to the customer database of interest:\n'))
+    user_choice = input('\nUsing the the table displayed, please enter the number corresponding to the customer database of interest:\n')
+    try:
+        user_choice = int(user_choice)
+    except:
+        pass
     while user_choice not in choices:
-        print('\nInvalid choice. Please choose a number associated with one of the databases listed below: \n')
         print(customer_data_databases.iloc[1:])
-        user_choice = input()
+        user_choice = input('\nInvalid choice. Please choose a number associated with one of the databases listed below: \n')
+        try:
+            user_choice = int(user_choice)
+        except:
+            pass
     confirmation = input(f'You have chosen "{customer_data_databases.iloc[user_choice][0]}". Is this correct (Y/N)? ').upper()
 database = customer_data_databases.iloc[user_choice][0]
 
 MAIN_FOLDER_PATH = fr"{input('Please enter the path of the directory within which you wish the data and figures to be saved: ')}".replace('"', '').replace("'",'')
-print(MAIN_FOLDER_PATH)
 while not os.path.exists(MAIN_FOLDER_PATH):
     print('\n')
     MAIN_FOLDER_PATH = fr"{input('The entered path does not exist. Please enter a valid path to continue: ')}"
-
+date = datetime.datetime.today().strftime('%Y-%m-%d')
+MAIN_FOLDER_PATH = os.path.join(MAIN_FOLDER_PATH, fr'{database[17:]}\{date}')
+if not os.path.exists(MAIN_FOLDER_PATH):
+    os.makedirs(MAIN_FOLDER_PATH)
+    assert os.path.exists(MAIN_FOLDER_PATH)
+print(f'\nAll files will be placed at: \n"{MAIN_FOLDER_PATH}".')
+    
 ## Get inputs function ##
 
-def get_input(prompt, success_conditions=None, failure_messages=None, message=None, wrapping_func=None):
-    
-    
+def get_input(prompt, success_conditions=None, failure_messages=None, message=None, wrapping_func=None, literal_str=False):
+
     if wrapping_func == None:
         wrapping_func = lambda x: x
     
@@ -77,43 +91,63 @@ def get_input(prompt, success_conditions=None, failure_messages=None, message=No
         print(message)
     
     if success_conditions == None:
-        return wrapping_func(input(prompt))
-    
+#         print('input1')
+        if literal_str==True:
+#             print('input2')
+            return fr"{input(prompt)}"
+        else:
+#             print('input3')
+            return wrapping_func(input(prompt))
     else:
-        x = input(prompt)
+        k=1
+#         print('input4')
+        x = fr"{input(prompt)}"
+        
+        x = x.replace('"', '')
         
         num_conditions_to_satisfy = len(success_conditions)
 
         success_count = 0
 
         while success_count < num_conditions_to_satisfy:
+#             print('input5')
         
             for idx in range(num_conditions_to_satisfy):
+#                 print('input6')
                 # print(f'Success condition {idx} is {success_conditions[idx](x)} because x is {x} and its type is {type(x)}')
                 if isinstance(success_conditions[idx], types.FunctionType):
+#                     print('input7')
                     if success_conditions[idx](x):
+#                         print('input8')
                         success_count+=1
                     else:
-                        if len(failure_messages) > 1:
+#                         print('input9')
+                        print(failure_messages)
+                        if failure_messages is not None and len(failure_messages) > 1:
+#                             print('input10')
                             print(failure_messages[idx].format(x, type(x), f'Condition {idx+1} failure'))
                             return get_input(prompt, 
                                             success_conditions=success_conditions, 
                                             failure_messages=failure_messages, 
                                             message=message,
                                             wrapping_func=wrapping_func)
-                        else:
-                            print(failure_messages[0])
+                        elif failure_messages is not None and len(failure_messages) == 1:
+#                             print('input11')
+                            print(failure_messages[0].format(x))
                             return get_input(prompt, 
                                              success_conditions=success_conditions, 
                                              failure_messages=failure_messages, 
                                              message=message,
-                                            wrapping_func=wrapping_func)
+                                             wrapping_func=wrapping_func)
                 
                 else:
+#                     print('input12')
                     if success_conditions[idx]:
                         success_count+=1
                     else:
+#                         print('input13')
                         if len(failure_messages) > 1:
+#                             print('input14')
                             print(failure_messages[idx].format(x, type(x), f'Condition {idx+1} failure'))
                             return get_input(prompt, 
                                             success_conditions=success_conditions, 
@@ -121,6 +155,7 @@ def get_input(prompt, success_conditions=None, failure_messages=None, message=No
                                             message=message,
                                             wrapping_func=wrapping_func)
                         else:
+#                             print('input15')
                             print(failure_messages[0])
                             return get_input(prompt, 
                                              success_conditions=success_conditions, 
@@ -133,10 +168,10 @@ def get_input(prompt, success_conditions=None, failure_messages=None, message=No
 ## Establish connection with the chosen customer data connection ##
 
 db_connection = pyodbc.connect('Driver={SQL Server};'
-                                'Server=' + db.server + ';'
+                                'Server=' + login_details['server'] + ';'
                                  'Database=' + database + ';'
-                                 'Uid=' + db.uid + ';'
-                                 'Pwd=' + db.pwd + ';')
+                                 'Uid=' + login_details['uid'] + ';'
+                                 'Pwd=' + login_details['pwd'] + ';')
 
 ## Define a function that checks whether a string can be converted to an integetr or not ##
 
@@ -160,20 +195,24 @@ if type_or_name_or_both in (1,3):
     systems_by_file = get_input(prompt='Would you like to \n0. Enter the system names here (enter 0); or \n1. Pass a file path containing the system names (enter 1)\n',
                                 success_conditions=(isintable, lambda x: int(x) in (0,1)),
                                 failure_messages=('{2}: {0} is not a valid choice as it cannot be converted into an integer. Please choose from 0 or 1.',
-                                                  '{2}: {0} is noT a valid choice as it is neither 0 nor 1. Please choose 0 or 1.'))
-    systems_by_file = bool(systems_by_file)
+                                                  '{2}: {0} is noT a valid choice as it is neither 0 nor 1. Please choose 0 or 1.'),
+                                wrapping_func=int)
 
-get_system_names_bool_args = {'by_names':bool(type_or_name_or_both==1),
-                              'by_types':bool(type_or_name_or_both==2),
-                              'systems_by_file':bool(type_or_name_or_both==3),
+else:
+    systems_by_file = 0
+
+get_system_names_bool_args = {'by_names':bool(type_or_name_or_both==1 or type_or_name_or_both==3),
+                              'by_types':bool(type_or_name_or_both==2 or type_or_name_or_both==3),
+                              'systems_by_file':bool(systems_by_file==1),
                               'everything':bool(type_or_name_or_both==4)}
 
 
 ## Define a function for retrieving system names form a comma separated text file ##
 
 def systems_from_csv(PATH):
+    
     systems = []
-
+    
     SYSTEMS_FILE_PATH = PATH
 
     with open(SYSTEMS_FILE_PATH, 'r') as systems_file:
@@ -185,6 +224,8 @@ def systems_from_csv(PATH):
         if '\'' in systems[i] or '\"' in systems[i]:
             systems[i] = systems[i].replace('\'', '')
             systems[i] = systems[i].replace('\"', '')
+    
+    return systems
 
 ## Prompt user for systems/system types/both and ensure at least one corresponding system exists ##
 
@@ -194,7 +235,7 @@ def get_system_names(db_connection, database, by_names=False, by_types=False, sy
             systems = get_input(prompt='Please enter the names of the systems for which you wish to retrieve data, separated by commas.\n')
             systems = re.split(',| ,|, | , ', systems)
             systems_as_string = str(systems).replace('[','(').replace(']',')')
-
+            
 
             if by_types:
                 system_types = get_input(prompt='Please enter the types of the systems for which you wish to retrieve data, separated by commas.\n')
@@ -213,9 +254,11 @@ def get_system_names(db_connection, database, by_names=False, by_types=False, sy
 
         else:
             systems_path = get_input(prompt='Please enter the file location for a comma separated file containing the names of the systems of interest:\n',
-                                    success_conditions=(os.path.exists,))
+                                     success_conditions=[os.path.exists],
+                                     failure_messages=['The path you have entered, namely {}, does not exist. Please try again.\n'])
             systems = systems_from_csv(systems_path)
             systems_as_string = str(systems).replace('[','(').replace(']',')')
+
 
             if by_types:
                 system_types = get_input(prompt='Please enter the types of the systems for which you wish to retrieve data, separated by commas.\n')
@@ -229,16 +272,13 @@ def get_system_names(db_connection, database, by_names=False, by_types=False, sy
                 check_system_name_query = f'select * from {database}.dbo.fst_GEN_system \
                                             where Description in {systems_as_string} \
                                             order by SystemTypeID'
-
         query_result = pd.read_sql_query(check_system_name_query, db_connection)
-
         valid_systems = list(query_result['Description'].unique())
-
         invalid_systems = list(set(systems) - set(valid_systems))
-
         if len(invalid_systems) > 1:
             print('checking invalid systems')
             if len(valid_systems) < 1:
+                print('yo13')
                 print(f'Could not find any systems within {database} corresponding to the system names and types (if any entered) provided. Please try again.')
                 return get_system_names(db_connection=db_connection, 
                                         database=database, 
@@ -265,13 +305,14 @@ def get_system_names(db_connection, database, by_names=False, by_types=False, sy
         query_result = pd.read_sql_query(check_system_name_query, db_connection)
 
         if len(query_result) > 0:
-            type_systems = list(query_result[['Description', 'SystemTypeID']])
+            type_systems = query_result[['Description', 'SystemTypeID']]
             print(f'The following systems were found to correspond with system types {system_types}:')
             print(type_systems)
             print('Will retrieve data for these systems.')
             return query_result, list(query_result.Description.unique())
         
         else:
+            print('yo19')
             print(f'Could not find any systems within {database} whose system type IDs correspond with any of {system_types}. Please try again.')
             return get_system_names(db_connection=db_connection, 
                                     database=database, 
@@ -291,6 +332,28 @@ def get_system_names(db_connection, database, by_names=False, by_types=False, sy
 systems_info, systems = get_system_names(db_connection=db_connection,
                                          database=database,
                                          **get_system_names_bool_args)
+
+
+## Prompt user for whether they want to obtain data separated by swaps, unseparated by swaps or both
+
+separate_by_swap = False
+sep_and_whole = False
+
+separate_by_swap_or_not = get_input(prompt=f'Would you like the system data to be: \n1. Separated by swaps (enter 1); \n2. Unseparated by swaps (enter 2); \n3. Plots for the entire data as well as the data separated by swaps (enter 3).\n',
+                                    success_conditions=(isintable, lambda x: int(x) in (1,2,3)),
+                                    failure_messages=('{2}: {0} is not a valid choice as it cannot be converted into an integer. Please choose from 1, 2 or 3.',
+                                                      '{2}: {0} is noT a valid choice as it is not in (1,2,3). Please choose 1, 2 or 3.'),
+                                    wrapping_func=int)
+
+if separate_by_swap_or_not in (1,3):
+    separate_by_swap = True
+    if separate_by_swap_or_not == 3:
+        sep_and_whole = True
+elif separate_by_swap_or_not == 2:
+    pass
+else:
+    raise ValueError(f'Invalid value of \'{separate_by_swap_or_not}\' of type {type(separate_by_swap_or_not)} passed to `separate_by_swap_or_not`.')
+
 
 ## Obtain parameter information ##
 
@@ -394,11 +457,52 @@ for system in systems:
     print(f'Retrieving data for {system}.')
     system_parameters = list(systems_parameter_info['param_mapping'][f'{system}'].keys())
     print(f'Parameters: \n{system_parameters}')
-    system_data = db.get_data(database=database,
-                              system_name=system,
-                              parameter_number=system_parameters)
-    system_param_mapping = db.get_parameter_info(database=database,
-                                                 system_name=system)
+
+    # Get systems data:
+
+    parameters_as_string = str(system_parameters).replace('[', '(').replace(']', ')')
+
+    system_data_query = (f'SELECT t3.[Description], t4.[zzDescription], t1.[LogTime], t1.[Value] \
+                           FROM [dbo].[fst_GEN_ParameterValue] AS t1 \
+                           INNER JOIN [dbo].[fst_GEN_Parameter] AS t2 \
+                            ON t1.[ParameterId] = t2.[ParameterID] \
+                           INNER JOIN [dbo].[fst_GEN_System] AS t3 \
+                            ON t2.[SystemID] = t3.[SystemID] \
+                           INNER JOIN [dbo].fst_GEN_ParameterType AS t4 \
+                            ON t2.[SystemTypeID] = t4.[SystemTypeID] \
+                            AND t2.[ParameterNumber] = t4.[ParameterNumber] \
+                           WHERE t3.[Description] = \'{str(system)}\' \
+                           AND t2.[ParameterNumber] in {parameters_as_string} \
+                           ORDER BY t1.[LogTime]')
+    
+    system_data = pd.read_sql_query(system_data_query, con=db_connection)
+
+    # Get system parameter mappings:
+
+    all_customer_systems_query = ('SELECT [SystemID], [SystemTypeID], [Description] '
+                                  'FROM [dbo].[fst_GEN_System] '
+                                  'ORDER BY [Description]')
+    all_customer_systems_res = pd.read_sql_query(all_customer_systems_query, con=db_connection)
+
+    system_type_ids = all_customer_systems_res.loc[all_customer_systems_res.Description == system, 'SystemTypeID']
+
+    if len(system_type_ids) == 0:
+        print(f'{system} has not system type in the database {database}. Removing this system from the systems for which data will be retrieved.')
+        del systems[system]
+        continue
+    elif len(system_type_ids) > 1:
+        print(f'{system} has multiple system IDs - choosing {str(max(system_type_ids))}.')
+    system_type_id= max(system_type_ids.values)
+    
+    get_parameters_info_query = (f'SELECT DISTINCT a.[ParameterNumber], [zzDescription], [SIUnitID] \
+                                 FROM fst_GEN_Parameter a \
+                                 INNER JOIN fst_GEN_ParameterType b \
+                                     ON a.[SystemTypeID] = b.SystemTypeID \
+                                     AND a.[ParameterNumber] = b.[ParameterNumber] \
+                                 WHERE b.[SystemTypeId] = {str(system_type_id)} \
+                                 ORDER BY a.[ParameterNumber] ASC')
+    
+    system_param_mapping = pd.read_sql_query(get_parameters_info_query, con=db_connection)
     
     systems_param_mapping[system] = dict(zip(system_param_mapping['ParameterNumber'].to_list(), system_param_mapping['zzDescription'].to_list()))
 
@@ -431,6 +535,8 @@ for sys in systems_in_dict:
 DATA_FILES_DIR = DATA_FOLDER_PATH
 FIG_DIR = os.path.join(MAIN_FOLDER_PATH,'Figures')
 CSV_DIR = AVAIL_FOLDER_PATH
+if not os.path.exists(DATA_FOLDER_PATH):
+    os.mkdir(DATA_FOLDER_PATH)
 if not os.path.exists(FIG_DIR):
     os.mkdir(FIG_DIR)
 if not os.path.exists(CSV_DIR):
@@ -545,6 +651,15 @@ def plot_prep_from_parquet(data_files_dir, include_system_names_like=None):
                     else:
                         next_swap_dt = swap_dates[swap_dt_idx+1]
                         all_systems_data[system_name][f"pump_{pump_num}"] = system_data[swap_dt:next_swap_dt]
+                
+                if all_systems_data[system_name]['swap_dates'][0] == all_systems_data[system_name]['swap_dates'][1]:
+                    del all_systems_data[system_name]['swap_dates'][0]
+                    pump_key_nums = [key for key in all_systems_data[system_name].keys() if key!='swap_dates']
+                    for p_num in range(1,len(pump_key_nums)):
+                        new_key = f'pump_{p_num}'
+                        old_key = f'pump_{p_num+1}'
+                        all_systems_data[system_name][new_key] = all_systems_data[system_name][old_key]
+                        del all_systems_data[system_name][old_key]
 
             print(f'Data for system {system_name} partitioned by swap date.')
 
@@ -567,30 +682,28 @@ def plot_prep_from_parquet(data_files_dir, include_system_names_like=None):
 
 all_systems_data = plot_prep_from_parquet(DATA_FILES_DIR)
 
-## Create dashboards ##
 
-def interactive_plot_system_data_1(data,
-                                 save_dest,
-                                 system,
-                                 system_position,
-                                 cols=None,
-                                 save=True,
-                                 show_plots=False):
-    
-    
-    start_datetime = data.index.min().strftime('%d/%m/%y %H:%M:%S')
-    
-    system_name = f"{system_position}: {system.capitalize().replace('_', ' ')}, Start Date-Time: {start_datetime}"
+## Define a function to partition parameters into type of process
 
+def order_parameters(data, cols):
+    '''
+    The function:
+    1. Separates the parameters into groups 
+    2. Changes the units of columns with temperature, pressure and flow from Kelvin, Pa and m^3/s to degrees Celcius, PSI and liters/minute, respectively.
+    All of this is then used for columnar plotting by the function `interactive_plot_custom_data_1`.'''
     parameters_ordered = {'DryPump':[],
                           'Booster':[],
                           'ExhaustAndShaft':[],
-                          'Time':[],
+                          'RunTime':[],
                           'Oil':[],
                           'Flow':[],
-                          'Other':[]
-                          }
-
+                          'Motor':[],
+                          'Vibration':[],
+                          'Pos':[],
+                          'MagneticBearing':[],
+                          'MiscellaneousTemperatures':[],
+                          'Other':[]}
+    
     data = data.rename(columns={col:col.replace(' ', '').replace('DP', 'DryPump').replace('MB', 'Booster') for col in data.columns})
 
     for column in data.columns:
@@ -602,18 +715,110 @@ def interactive_plot_system_data_1(data,
             parameters_ordered['ExhaustAndShaft'].append(column)
         elif 'Oil' in column:
             parameters_ordered['Oil'].append(column)
+        elif 'Hour' in column or 'Time' in column:
+            parameters_ordered['RunTime'].append(column)
         elif 'Flow' in column:
             parameters_ordered['Flow'].append(column)
+        elif 'Motor' in column:
+            parameters_ordered['Motor'].append(column)
+        elif 'Vib' in column:
+            parameters_ordered['Vibration'].append(column)
+        elif 'Pos' in column:
+            parameters_ordered['Pos'].append(column)
+        elif 'Magnetic' in column:
+            parameters_ordered['MagneticBearing'].append(column)
+        elif 'Temperature' in column:
+            parameters_ordered['MiscellaneousTemperatures'].append(column)
         else:
             parameters_ordered['Other'].append(column)
+        
+        if 'temp' in column.lower():
+            data[column] = data[column] - 273.15
+        elif 'pressure' in column.lower():
+            data[column] = data[column] * 0.000145038
+        elif 'flow' in column.lower():
+            data[column] = data[column] * 60000
+    
+    for key in parameters_ordered.keys():
+
+       parameters_ordered[key].sort()
     
     if cols==None:
         cols = data.columns
-        # print(cols)
     
-    fig_cols = ceil(len(cols)**0.5)
+    return parameters_ordered, data 
+
+## Define a function to compute sma and ewma for each parameter passed
+
+## Define a function to compute sma and ewma for each parameter passed
+
+def moving_averages(data, 
+                    current_parameter, 
+                    run_time_data=False,
+                    ewma_span=None,
+                    ewma_com=None,
+                    ewma_halflife=None,
+                    ewma_alpha=None,
+                    ewma_min_periods=None,
+                    ewma_adjust=True,
+                    ewma_ignore_na=False,
+                    resampling_frequency='12H',
+                    rolling_period='14D'):
+
+    if not run_time_data:
+        start_date = data.index.min()
+        end_date = data.index.max()
+        data = data.loc[~data.index.duplicated()]
+        old_data = data.copy()
+        new_index = pd.date_range(start=start_date,
+                                  end=end_date,
+                                  freq=resampling_frequency)
+        smoothed_data = data[data.notna()].reindex(new_index, method='ffill')
+        smoothed_data.index.name='LogTime'
+        col_data_df = pd.DataFrame(smoothed_data)
+
+        # Simple Moving Average:
+        sma_parameter = f'{current_parameter}_SimpleMovingAverage'
+        sma_col_data = col_data_df[current_parameter].rolling(rolling_period).mean()
+        col_data_df[sma_parameter] = sma_col_data
+
+        # Exponentially Weighted Moving Average:
+        ewma_parameter = f'{current_parameter}_ExpontentiallyWeighteMovingAverage'
+        ewma_col_data = col_data_df[current_parameter].ewm(span=ewma_span,
+                                                           com=ewma_com,
+                                                           halflife=ewma_halflife,
+                                                           alpha=ewma_alpha,
+                                                           min_periods=ewma_min_periods,
+                                                           adjust=ewma_adjust,
+                                                           ignore_na=ewma_ignore_na).mean()
+        col_data_df[ewma_parameter] = ewma_col_data
+        col_data_df = col_data_df.reindex(old_data.index, 
+                                          method='ffill')
+        col_data_df[current_parameter] = old_data
+        return col_data_df, sma_parameter, ewma_parameter
     
-    fig_rows = ceil(len(cols)/fig_cols)
+    else:
+        col_data_df = pd.DataFrame(data[data.notna()])
+        return col_data_df
+
+## Create dashboards ##
+
+def interactive_plot_system_data_1(data,
+                                 save_dest,
+                                 system,
+                                 system_position,
+                                 cols=None,
+                                 save=True,
+                                 show_plots=False):
+    
+    
+    start_datetime = data.index.min().strftime('%d/%m/%Y %H:%M:%S')
+
+    end_datetime = data.index.max().strftime('%d/%m/%Y %H:%M:%S')
+    
+    system_name = f"{system_position}: {system.capitalize().replace('_', ' ')}, Start Date-Time: {start_datetime}, End Date-Time: {end_datetime}"
+
+    parameters_ordered, data = order_parameters(data, cols)
     
     parts_plots = {}
     count = 0
@@ -636,14 +841,41 @@ def interactive_plot_system_data_1(data,
                 radius_size=3
             else:
                 radius_size=0.8
-            source = plotting.ColumnDataSource(pd.DataFrame(col_data[col_data.notna()]))
             current_parameter = parameters_ordered[i][j]
+
+            col_data = col_data[col_data.notna()]
+
+            if current_parameter not in parameters_ordered['RunTime']:
+                col_data_df, sma_parameter, ewma_parameter = moving_averages(col_data, 
+                                                                         current_parameter=current_parameter,
+                                                                         run_time_data=False,
+                                                                         rolling_period='14D',
+                                                                         ewma_alpha=0.15,
+                                                                         ewma_adjust=False)
+                source = plotting.ColumnDataSource(col_data_df)
+
+                # Create interactive hovertool
+                fig_hover_tool = HoverTool(tooltips=[('LogTime', '@LogTime{%Y-%m-%d %H:%M:%S.%3N}'),
+                                                    (f'{current_parameter}', f'@{current_parameter}'),
+                                                    (f'{sma_parameter}', f'@{sma_parameter}'),
+                                                    (f'{ewma_parameter}', f'@{sma_parameter}')],
+                                           formatters={'@LogTime':'datetime'},
+                                           mode='mouse')    
+
+            else:
+                col_data_df = moving_averages(col_data,
+                                              current_parameter=current_parameter,
+                                              run_time_data=True,
+                                              rolling_period='14D',
+                                              ewma_alpha=0.15,
+                                              ewma_adjust=False)
+                source = plotting.ColumnDataSource(col_data_df)
+                # Create interactive hovertool
+                fig_hover_tool = HoverTool(tooltips=[('LogTime', '@LogTime{%Y-%m-%d %H:%M:%S.%3N}'),
+                                                    (f'{current_parameter}', f'@{current_parameter}')],
+                                           formatters={'@LogTime':'datetime'},
+                                           mode='mouse')
             
-            # Create interactive hovertool
-            fig_hover_tool = HoverTool(tooltips=[('LogTime', '@LogTime{%Y-%m-%d %H:%M:%S.%3N}'),
-                                                 (f'{current_parameter}', f'@{current_parameter}')],
-                                       formatters={'@LogTime':'datetime'},
-                                       mode='mouse')            
             if count > 0:
                 fig = plotting.figure(x_axis_label='DateTime',
                                       y_axis_label=current_parameter,
@@ -664,35 +896,87 @@ def interactive_plot_system_data_1(data,
                 shared_x_range = fig.x_range
 
             fig.line(x='LogTime', 
-                 y=current_parameter, 
-                 source=source, 
-#                  legend_label=cols[i]
-                 color='#09ed28'
-                )
+                     y=current_parameter, 
+                     source=source, 
+                     color='#47ed00',
+                     line_alpha=0.7,
+                     muted_alpha=0.2,
+                     legend_label=current_parameter)
             
+            fig.add_tools(fig_hover_tool)
+            
+            if current_parameter not in parameters_ordered['RunTime']:
+                fig.line(x='LogTime',
+                        y=sma_parameter,
+                        source=source,
+                        color='red',
+                        line_alpha=1,
+                        muted_alpha=0.1,
+                        legend_label=sma_parameter)
+
+                fig.line(x='LogTime',
+                        y=ewma_parameter,
+                        source=source,
+                        color='blue',
+                        line_alpha=1,
+                        muted_alpha=0.2,
+                        legend_label=ewma_parameter)
+
             fig.circle(x='LogTime',
                        y=current_parameter,
                        source=source,
-                       color='#f28a13',
+                       color='green',
                        radius=radius_size)
             
-            fig.add_tools(fig_hover_tool)
+            fig.title.text_font_size = '12pt'
 
             fig.xaxis.major_label_orientation = math.pi/4
 
             fig.axis.axis_label_text_font_size = '10px'
 
+            fig.legend.title = 'Legend'
+
+            fig.legend.title_text_font_size = '12pt'
+
+            fig.legend.title_text_font_style = 'italic'
+
+            fig.legend.title_text_color = 'white'
+
+            fig.legend.location = 'top_left'
+
+            fig.legend.border_line_alpha = 1
+
+            fig.legend.border_line_color = 'black'
+
+            fig.legend.background_fill_alpha = 0.7
+
+            fig.legend.background_fill_color = 'grey'
+
+            fig.legend.click_policy = 'hide'
+
+            fig.legend.label_text_font_size = '12pt'
+
+            fig.legend.label_text_font_style = 'italic'
+
+            fig.legend.label_text_color = 'white'
+            
+            # fig.add_layout(fig.legend[0], 'right')
+
             parts_plots[i].append(fig)
     
     
-    plot_title = Div(text=f"{system_name}") #, style={'font-size':'300%', 
+    plot_title = Div(text=f"{system_name}",
+                     style={'font-size':'30px', 'color':'black'}) #, style={'font-size':'300%', 
                                             #       'color':'black', 
                                             #       'text-align':'center', 
                                             #       'margin':'auto'})
     
     plot_columns = []
     for key in parts_plots.keys():
-        plot_columns.append(layouts.column(parts_plots[key]))
+        if len(parts_plots[key]) > 0:
+            part_name = Div(text=f'{key} Parameters',
+                            style={'font-size':'22px', 'color':'black'})
+            plot_columns.append(layouts.column(part_name, layouts.column(parts_plots[key])))
 
     if save:
         io.output_file(os.path.join(save_dest, 
@@ -712,33 +996,53 @@ def interactive_plot_all_systems_data(all_systems_data,
                                       mark=1,
                                       cols=None,
                                       save=True,
-                                      show_plots=False):
+                                      show_plots=False,
+                                      separate_by_swap=True,
+                                      sep_and_whole=True):
     
     system_positions = [str(dict_key) for dict_key in all_systems_data.keys()]
     
+    
     for position in system_positions:
         position_systems = [dict_key for dict_key in all_systems_data[position].keys() if 'swap_date' not in str(dict_key)]
-        
-        for system in position_systems:
-            columns = all_systems_data[position][system].columns
-            columns = {col:col.replace(' ', '').replace('DP', 'DryPump').replace('MB', 'Booster') for col in columns}
-            all_systems_data[position][system].rename(columns={})
-            print(f'\nWorking on {position} {system}.\n')
-            bokeh_system_data_plotters[f"mk{mark}"](data=all_systems_data[position][system],
-                                                    save_dest = save_dest,
-                                                    system_position = f"{position}",
-                                                    system=f"{system}",
+        if separate_by_swap or sep_and_whole:
+            for system in position_systems:
+                # columns = all_systems_data[position][system].columns
+                # columns = {col:col.replace(' ', '').replace('DP', 'DryPump').replace('MB', 'Booster') for col in columns}
+                # all_systems_data[position][system].rename(columns={})
+                print(f'\nWorking on the separated by swap date plot for {position} {system}.\n')
+                bokeh_system_data_plotters[f"mk{mark}"](data=all_systems_data[position][system],
+                                                        save_dest = save_dest,
+                                                        system_position = f"{position}",
+                                                        system=f"{system}",
+                                                        show_plots=show_plots,
+                                                        save=save)
+
+                if save:
+                    text = '\033[1m' + f"Dashboard for {position} {system} generated and placed within '{save_dest}.'" + '\033[0m'
+                    colored_text = colored(text=text, color='blue')
+                    print(colored_text)
+    
+        if (not separate_by_swap) or sep_and_whole:
+            all_data_for_position = pd.concat([all_systems_data[position][sys] for sys in position_systems])
+            print(f'\nWorking on the plot for all of the data on {position}.\n')
+            bokeh_system_data_plotters[f'mk{mark}'](data=all_data_for_position,
+                                                    save_dest=save_dest,
+                                                    system_position=position,
+                                                    system='All_Systems',
                                                     show_plots=show_plots,
                                                     save=save)
-
             if save:
-                text = '\033[1m' + f"Dashboard for" + f' {position} {system} ' + f"generated and placed at" + f" '{save_dest}.'" + '\033[0m'
+                text = '\033[1m' + f"Dashboard for all of the data on {position} generated and placed within '{save_dest}.'" + '\033[0m'
                 colored_text = colored(text=text, color='blue')
                 print(colored_text)
+
 
 interactive_plot_all_systems_data(all_systems_data,
                                   save_dest=FIG_DIR,
                                   mark=1,
                                   show_plots=False,
-                                  save=True)
-                                  
+                                  save=True,
+                                  separate_by_swap=separate_by_swap,
+                                  sep_and_whole=sep_and_whole)
+
